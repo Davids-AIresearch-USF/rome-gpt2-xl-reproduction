@@ -12,7 +12,7 @@ python analyze_rome.py results/ROME_Experiment_Results.zip summary.json
 python plot_results.py results/ROME_Experiment_Results.zip summary.json plots
 ```
 
-The editing results cover 200 evaluation cases. The 20 pilot cases are separate. The summary gives prompt counts, paired differences, and the preferences that changed when a passage was added. It also gives the tracing averages and the citizenship example from the report. The plotting script draws three figures from the same results.
+The summary uses 200 evaluation cases and 50 traced statements. The 20 pilot cases are separate.
 
 The report source and the three figures are in `paper`. To build the report with an installed LaTeX distribution, run `pdflatex main.tex`, `bibtex main`, and `pdflatex main.tex` twice more from that directory.
 
@@ -20,7 +20,7 @@ The report source and the three figures are in `paper`. To build the report with
 
 1. Open `ROME_GPT_2_XL_Reproduction.ipynb` in a fresh Google Colab GPU runtime and run the four cells in order. The 200 evaluation cases took 2.38 hours on a Tesla T4.
 2. The first cell installs the Python packages and downloads the datasets, [ROME code](https://github.com/kmeng01/rome/tree/0874014cd9837e4365f3e6f3c71400ef11509e04), and [GPT-2 XL checkpoint](https://huggingface.co/openai-community/gpt2-xl/tree/15ea56dee5df4983c59b2538573817e1667135e2) used in the experiment.
-3. The next cells select the cases and prefixes, score each model condition, and trace the 50 statements. Results go in `/content/rome_outputs`. To resume after an interruption, restore that whole folder from a single checkpoint in a fresh GPU runtime before running the four cells. The notebook checks the saved plans, reuses the saved ROME editing contexts, and skips completed cases and traces.
+3. Results go in `/content/rome_outputs`. To resume after an interruption, restore that whole folder from a single checkpoint in a fresh GPU runtime before running the four cells. The notebook checks the saved plans, reuses the saved ROME editing contexts, and skips completed cases and traces.
 4. Run the following in a new Colab code cell to download a checkpoint or the final results. Use the downloaded ZIP as the input to the CPU commands above.
 
 ```python

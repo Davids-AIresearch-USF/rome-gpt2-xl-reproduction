@@ -1,4 +1,3 @@
-"""Summarize matched CounterFact cases and causal traces from the Colab experiment."""
 import argparse
 import io
 import json

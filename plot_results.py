@@ -89,7 +89,7 @@ for ax, values, title in zip(axes, effects, ["MLP restoration", "Attention resto
                         vmax=scale, interpolation="nearest")
     ax.set_yticks(range(6), labels, fontsize=8)
     ax.set_title(title, loc="left", fontsize=11)
-axes[-1].set_xlabel("Center layer of the ten-layer restoration window")
+axes[-1].set_xlabel("Center layer (window up to 10 layers)")
 fig.colorbar(heatmap, ax=axes, label="Recovery in answer probability (percentage points)", shrink=.88)
 fig.savefig(output / "tracing.pdf")
 plt.close(fig)
