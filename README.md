@@ -4,7 +4,7 @@ This CAI 5307 project compares Rank-One Model Editing (ROME), unconstrained fine
 
 ## Recalculate the results and draw the figures
 
-From this directory, run the commands below with Python. Choose new output names if `summary.json` or the `plots` directory already exists.
+Run these commands from the repository directory. They use the saved predictions and traces and work on a CPU. Choose new output names if `summary.json` or `plots` already exists.
 
 ```sh
 python -m pip install numpy matplotlib
@@ -12,23 +12,31 @@ python analyze_rome.py results/ROME_Experiment_Results.zip summary.json
 python plot_results.py results/ROME_Experiment_Results.zip summary.json plots
 ```
 
-The ZIP contains 20 pilot records, 200 evaluation records, 50 MLP and 50 attention arrays, the case and tracing plans, and the ROME rewrite contexts. The analysis checks case identities, keeps pilot records out of the evaluation, and writes the editing scores, paired bootstrap intervals and mean tracing effects. The plotting command makes three PDFs showing the editing scores, the two tracing profiles, and the tracing heat maps.
+The editing results cover 200 evaluation cases. The 20 pilot cases are separate. The summary gives prompt counts, paired differences, and the preferences that changed when a passage was added. It also gives the tracing averages and the citizenship example from the report. The plotting script draws three figures from the same results.
 
 The report source and the three figures are in `paper`. To build the report with an installed LaTeX distribution, run `pdflatex main.tex`, `bibtex main`, and `pdflatex main.tex` twice more from that directory.
 
 ## Run the experiment
 
-1. Open `ROME_GPT_2_XL_Reproduction.ipynb` in Google Colab and select a GPU runtime. The reported experiment used an NVIDIA Tesla T4. The 200 editing records took 2.38 GPU hours, with setup, pilot and tracing time on top of that.
-2. Run all four cells, in order. The first cell checks out the authors' code at `0874014cd9837e4365f3e6f3c71400ef11509e04`, downloads CounterFact and the known-facts file, and loads `openai-community/gpt2-xl` at revision `15ea56dee5df4983c59b2538573817e1667135e2`. Use a fresh runtime for a full rerun. The notebook installs its Python dependencies. It uses the authors' published cached second moment for ROME.
-3. The second cell chooses the pilot and evaluation records and records the context prefixes. The third cell runs the pilot and the four model conditions, restores the weights after each edit, and writes one JSON file per case to `/content/rome_outputs`. The fourth cell writes the 100 tracing arrays. Check that the folder contains `plan.json`, `trace_plan.json`, `edit_contexts.json`, and all expected case and trace files.
-4. In Colab's Terminal, make a ZIP from `/content` with the `rome_outputs` folder at its root. Download the ZIP from the Files tab, then analyze it using the command above with the downloaded ZIP path.
+1. Open `ROME_GPT_2_XL_Reproduction.ipynb` in a fresh Google Colab GPU runtime and run the four cells in order. The 200 evaluation cases took 2.38 hours on a Tesla T4.
+2. The first cell installs the Python packages and downloads the datasets, [ROME code](https://github.com/kmeng01/rome/tree/0874014cd9837e4365f3e6f3c71400ef11509e04), and [GPT-2 XL checkpoint](https://huggingface.co/openai-community/gpt2-xl/tree/15ea56dee5df4983c59b2538573817e1667135e2) used in the experiment.
+3. The next cells select the cases and prefixes, score each model condition, and trace the 50 statements. Results go in `/content/rome_outputs`. To resume after an interruption, restore that whole folder from a single checkpoint in a fresh GPU runtime before running the four cells. The notebook checks the saved plans, reuses the saved ROME editing contexts, and skips completed cases and traces.
+4. Run the following in a new Colab code cell to download a checkpoint or the final results. Use the downloaded ZIP as the input to the CPU commands above.
 
-```sh
-cd /content
-python -m zipfile -c ROME_Experiment_Results.zip rome_outputs
+```python
+from datetime import datetime
+from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
+from google.colab import files
+
+folder = Path("/content/rome_outputs")
+archive = folder.parent / f"ROME_Results_{datetime.now():%Y%m%d_%H%M%S}.zip"
+with ZipFile(archive, "x", compression=ZIP_DEFLATED) as bundle:
+    for path in sorted(folder.iterdir()):
+        if path.suffix in {".json", ".npz"}:
+            bundle.write(path, path.relative_to(folder.parent))
+files.download(str(archive))
 ```
-
-Colab stores `/content` on the current runtime. When continuing the same run after a runtime replacement, restore a saved `rome_outputs` folder before running the cells. Existing case and trace files are skipped. Keep outputs from different versions in separate folders. GPU and library differences can produce small numerical changes.
 
 ## Sources
 
