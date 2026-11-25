@@ -1,0 +1,159 @@
+\documentclass[11pt]{article}
+\usepackage[preprint]{acl}
+\usepackage{times,latexsym,graphicx,booktabs}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype,amsmath}
+\newcommand{\ProjectRepository}{}
+\title{Reproducing ROME: Factual Model Editing\\and Robustness to Added Context}
+\author{David Johnson\\University of South Florida\\CAI 5307: Natural Language Processing}
+\begin{document}\maketitle
+\begin{abstract}
+A factual edit is useful when the model repeats the new answer across different wordings and still answers correctly about related subjects. I compared Rank-One Model Editing (ROME), two fine-tuning baselines, and unchanged GPT-2 XL on 200 matched CounterFact records. ROME preferred the new answer on 100.0\% of rewrite prompts and 95.8\% of paraphrases. It preferred the original answer on 78.2\% of neighborhood prompts. I also evaluated added context and traced recovery of factual predictions on 50 separate statements. Adding 128 tokens of unrelated text reduced paraphrase success by 2.0 percentage points for both the original and edited model.
+\end{abstract}
+\section{Introduction}
+An edit that changes the response to one question may fail when the same fact is phrased differently. Conversely, a strong edit can make the new answer more likely even when the question concerns a different subject. \citet{meng2022locating} proposed a rank-one update to a feed-forward weight matrix to change one fact while preserving related answers. This project reproduces selected GPT-2 XL comparisons from their Table 4 and the component-level causal tracing from Figure 2. It extends the editing comparison by putting neutral text in front of a factual question.
+\paragraph{What a factual edit should preserve.}
+CounterFact represents a fact with a subject, a relation, and an object. An edit supplies a different object for a particular subject while leaving the underlying relation intact. For a given edit, the test includes the exact rewrite prompt, reworded prompts about that same subject, and prompts about other subjects for which the old answer should still be preferred. That final group makes the test sensitive to a broad change in how the model treats a relation. Increasing the score of the new answer in many unrelated situations can make the direct rewrite look strong while damaging neighboring facts.
+
+\paragraph{Locating and changing a computation.}
+The original paper first traced which activations affect the probability of a factual answer. In GPT-2 XL, restoring outputs from a middle-layer feed-forward network (a multilayer perceptron, or MLP) helped the model recover the original answer near the end of the subject name. Restoring attention outputs helped most in later layers at the end of the prompt. ROME addresses the first pattern by changing a feed-forward projection. The authors estimate a key from the subject representation across different preceding texts. They optimize a value that favors the new answer, then use a rank-one update to make the projection map the key to the new value. The second-moment estimate weights the update so the new mapping has less effect on keys that the model often encounters \citep{meng2022locating}.
+
+\paragraph{Questions tested here.}
+I examined three claims. First, I tested whether ROME was more specific than ordinary fine-tuning once both could change the direct answer. Second, I checked whether restoring MLP outputs helped most at the subject name and restoring attention outputs helped most at the end of the prompt. Third, I put the same neutral passages in front of original-model and edited-model prompts to test whether those passages changed the measured success of the edit. The tracing and editing samples answer different questions and were selected separately.
+
+\section{Experimental setup}
+I sampled 200 records without replacement from the first 7,500 released CounterFact records. A NumPy permutation with seed 42 supplied those records and a disjoint 20-record pilot. All four conditions used identical evaluation cases. ROME edited the output projection in layer 17. Ordinary fine-tuning (FT) used layer 1. Constrained fine-tuning (FT+L) used layer 0 with an elementwise change limit of 0.0005. Layer indices start at zero. Each method used its released hyperparameters \citep{romecode}. After scoring each edit I restored the starting weights.
+
+\subsection{Matching the model conditions}
+I used the 48-block GPT-2 XL checkpoint for all conditions and evaluated one edit at a time. I scored the starting model before applying any edit for a record. The editing functions return a copy of the parameters they change. After collecting scores for a method, I restored those parameters before running the next method. This keeps the four conditions paired by record and prevents a change made for one subject from altering the starting model for the next subject. I used the same tokenizer and candidate strings throughout. Tokenization of the candidates includes the leading space that separates an answer from a prompt.
+
+\begin{table}[t]\centering\small
+\begin{tabular}{@{}p{.18\columnwidth}p{.75\columnwidth}@{}}\toprule
+Method & Configuration \\\midrule
+Original & GPT-2 XL with the original parameters.\\
+FT & Layer 1 projection. Up to 25 steps, learning rate $5\times10^{-4}$.\\
+FT+L & Layer 0 projection. Up to 25 steps, learning rate $5\times10^{-4}$, elementwise limit $5\times10^{-4}$.\\
+ROME & Layer 17 projection, last subject token, released second moment. Value optimization up to 20 steps at a learning rate of 0.5.\\\bottomrule
+\end{tabular}
+\caption{Settings from the released GPT-2 XL hyperparameter files. Layer indices start at zero. The fine-tuning baselines use their respective released layers.}
+\end{table}
+
+The fine-tuning methods change a full projection matrix through gradient steps. The version denoted FT+L clips each element of the change within its fixed limit. ROME computes a one-direction update at layer 17. I used the released configuration for each method, including the distinct layers for FT and FT+L. The comparison therefore measures the methods as implemented in the paper's code. It does not isolate the effect of changing the constraint while holding the layer fixed.
+
+\subsection{Candidate scoring}
+For a prompt $p$ and candidate answer $a=(a_1,\dots,a_m)$, the evaluator uses the mean loss
+\begin{equation}
+  L(a\mid p)= -\frac{1}{m}\sum_{t=1}^m
+       \log P(a_t\mid p,a_{<t}).
+\end{equation}
+Conditioning on the earlier tokens of the candidate allows a multi-token answer to be scored token by token. Dividing by the answer's token count keeps the score on the same scale for different candidate lengths. On rewrites and paraphrases, I count a success when the replacement has lower loss. On neighbors, I count a success when the original answer has lower loss. Each record supplied one rewrite, two paraphrases, and ten neighborhood prompts. Thus each model condition had 200, 400, and 2,000 prompts, respectively, in the zero-prefix comparison.
+
+Efficacy measures preference for the new answer on the original rewrite prompt. Generalization measures the same preference on paraphrases. Specificity measures preference for the original answer on neighborhood prompts. A tie counts as a failure. I averaged prompts within each record before averaging records. The composite is the harmonic mean of the three aggregate percentages. I resampled whole records jointly across all conditions 10,000 times with seed 42. Intervals use the 2.5th and 97.5th percentiles. The pilot records are excluded from every evaluation estimate.
+
+Two paraphrases of the same question can succeed or fail together, as can the ten neighborhood prompts. I therefore resampled whole records. For a comparison between two methods, I resampled a record with all of its outputs from both methods. The bootstrap therefore preserves both the links between prompts within a record and the pairing across methods. I computed the harmonic mean after obtaining the three overall rates in each resample. Computing the harmonic mean at the record level would give an especially large weight to a record with a zero in one category and would answer a different question.
+
+\begin{figure*}[t]\centering\includegraphics[width=\textwidth]{editing_scores.pdf}
+\caption{Observed success by prompt group for the 200 matched CounterFact cases. Markers indicate point estimates, with 95\% record-bootstrap intervals. Rewrite and paraphrase success mean preference for the replacement answer. Neighborhood success means preference for the original answer.}
+\end{figure*}
+\begin{table*}[t]\centering\small\begin{tabular}{lrrrr}\toprule
+Method & Efficacy & Generalization & Specificity & Harmonic mean\\\midrule
+Original & 18.5 [13.0, 24.0] & 22.8 [18.0, 27.8] & 80.6 [76.8, 84.3] & 27.2 [21.4, 32.6] \\
+FT & 100.0 [100.0, 100.0] & 86.5 [82.0, 90.5] & 42.1 [37.5, 46.7] & 66.2 [62.1, 69.9] \\
+FT+L & 99.0 [97.5, 100.0] & 47.0 [41.0, 53.2] & 71.7 [67.3, 76.0] & 66.2 [62.0, 70.0] \\
+ROME & 100.0 [100.0, 100.0] & 95.8 [93.2, 97.8] & 78.2 [74.0, 82.0] & 90.3 [88.3, 92.0] \\
+\bottomrule\end{tabular}
+\caption{Measured CounterFact success rates on 200 held-out GPT-2 XL records, in percent. Brackets give 95\% paired-record bootstrap intervals.}\end{table*}
+\section{Reproduced editing results}
+The unchanged model's neighborhood specificity was 80.6\%. Ordinary fine-tuning reached 100.0\% efficacy and 42.1\% specificity. ROME reached 100.0\% and 78.2\%, respectively. The paired ROME-minus-FT difference in specificity was +36.0 [+31.9, +40.3] percentage points. On the direct prompts, ROME and ordinary fine-tuning both succeeded on every case. When the question changed, ROME also succeeded on 95.8\% of paraphrases and preserved far more answers about neighboring subjects. Its composite score was 90.3, compared with 89.2 in the published 7,500-record evaluation. The sample, model software and random contexts can affect the numerical estimates. The reported values measure preference between two supplied answers. They do not measure whether a model would produce either answer unaided.
+
+\subsection{Success across prompts from the same record}
+The similar direct-rewrite rates conceal different behavior outside the exact rewrite prompt. ROME preferred the new answer on both paraphrases for 186 records. Ordinary fine-tuning did so for 164. For three ROME records neither paraphrase favored the target, even though all 200 direct rewrites succeeded. Checking only the rewrite would have missed those three failures. The FT+L constraint recovered much of the neighborhood performance lost by FT, but it succeeded on only 188 of 400 paraphrases.
+
+For the neighborhood prompts, the original model preferred the original candidate on 1,612 of 2,000 prompts, compared with 1,563 for ROME and 842 for FT. ROME preserved all ten preferences for 91 records, while FT did so for 11. A record on which ROME preserved all ten neighboring answers had the same chance of being drawn in the bootstrap as one on which it preserved only one. Treating the 2,000 prompts as independent would lose that grouping.
+
+\begin{table}[t]\centering\small
+\begin{tabular}{@{}lrrr@{}}\toprule
+Method & Rewrite & Paraphrase & Neighborhood \\\midrule
+Original & 37 & 91 & 1,612 \\
+FT & 200 & 346 & 842 \\
+FT+L & 198 & 188 & 1,434 \\
+ROME & 200 & 383 & 1,563 \\\bottomrule
+\end{tabular}
+\caption{Successful individual prompts in the zero-prefix comparison. Column denominators are 200, 400, and 2,000. These counts use the same cases as the percentage table.}
+\end{table}
+
+\subsection{Comparison with the published benchmark}
+The published results give ROME a 35.0 percentage point advantage over ordinary FT in neighborhood specificity. The corresponding gap here was 36.0 points. The unchanged model differed more across studies in paraphrase success, at 22.8\% here versus 24.7\% in the published table. Comparison with the paper is descriptive because the published aggregate values do not supply paired scores for my bootstrap. My sample came from the same released evaluation pool, so it is a reproduction on a subset rather than a separate benchmark.
+
+The paper also asks how strongly one answer is preferred and whether the model still generates fluent text after an edit. My comparison uses the three candidate-preference rates in Table 4. A narrow win and a large win count equally, and the scores alone cannot tell us what answer the model would generate on its own.
+\begin{table}[t]\centering\small\begin{tabular}{lrrrr}\toprule
+Method & Eff. & Gen. & Spec. & Mean\\\midrule
+Original & 22.2 & 24.7 & 78.1 & 30.5 \\
+FT & 100.0 & 87.9 & 40.4 & 65.1 \\
+FT+L & 99.1 & 48.7 & 70.3 & 66.9 \\
+ROME & 100.0 & 96.4 & 75.4 & 89.2 \\
+\bottomrule\end{tabular}\caption{Published GPT-2 XL results from Table 4 of \citet{meng2022locating}. Mean is the harmonic mean.}\end{table}
+\section{Extension: added context}
+I used two descriptions written before evaluation. One begins with a folded sheet beside a tray. The other describes tiles on a narrow ledge. Each was truncated at 128 GPT-2 XL tokens, and its first 32 tokens supplied the shorter condition. The fixed prefix was followed by two newlines and the original prompt. Subject names and both candidate answers were checked against the passage text. All prompts and answers fit the 1,024-token context limit. For each record, prefix scores were averaged over the two passages of the same length. I subtracted the zero-prefix score separately for the original and edited model, then subtracted the original model's change from the edited model's change. A negative value means that adding a prefix reduced success more, or improved it less, after editing.
+
+\subsection{Why use unrelated prefixes?}
+The paraphrase groups change the wording near the queried fact. A neutral prefix changes what the model reads before that wording while leaving the query and candidate strings alone. This makes it possible to test what happens when the model reads more text before the question, without giving it a competing fact or a new instruction. The same two passages appear for all subjects, so differences between models do not arise from assigning different contexts to different edits. Both lengths are prefixes of those same passages. For example, the 32-token description of the sheet and tray is the beginning of the 128-token version.
+
+I evaluated the unchanged and ROME-edited model on both paraphrases and all ten neighbors for each record, using two passages at each length. This yielded 4,800 prefixed comparisons per model at each length. For each prompt group, I reduced the two passage-specific scores to a record-level average before comparing lengths with the zero-prefix condition. The intervals use the same paired record-resampling procedure as the editing comparison. The intervals describe variation across the 200 records. Both passages were the same for every record.
+\begin{table*}[t]\centering\small\begin{tabular}{rlrr}\toprule
+Prefix tokens & Comparison & Paraphrase change & Neighborhood change\\\midrule
+32 & Original & -1.8 [-4.4, +0.8] & -1.0 [-2.4, +0.4] \\
+32 & ROME & -0.4 [-1.8, +1.0] & -0.8 [-2.3, +0.8] \\
+32 & ROME minus original & +1.4 [-1.5, +4.2] & +0.2 [-0.4, +0.9] \\
+128 & Original & -2.0 [-4.9, +0.8] & -2.3 [-4.0, -0.8] \\
+128 & ROME & -2.0 [-3.9, -0.4] & -1.7 [-3.4, -0.1] \\
+128 & ROME minus original & +0.0 [-3.4, +3.4] & +0.6 [-0.1, +1.4] \\
+\bottomrule\end{tabular}\caption{Change from the zero-prefix condition in percentage points. Brackets give 95\% paired bootstrap intervals.}\end{table*}
+The longer passages lowered paraphrase success by 2.0 percentage points for both models. They lowered neighborhood specificity by 2.3 points for the original model and 1.7 for ROME. The intervals for the differences between models included zero at both lengths. These two passages therefore give little evidence that editing changed how sensitive the model was to unrelated text.
+
+\subsection{Interpreting the change}
+Before adding a passage, ROME preferred the replacement on 95.8\% of paraphrases, compared with 22.8\% for the original model. With the longer passages, those rates fell by the same two percentage points. The models still differed greatly in how often they preferred the replacement. For 128-token prefixes, the ROME-minus-original contrast for paraphrases was 0.0 points at the displayed precision, with an interval from $-3.4$ to $+3.4$. That leaves room for modest differences in either direction.
+
+These results cover one form of prompt variation. The passages did not mention the subject or either candidate answer under the matching rule, and the longest prompt plus candidate was kept within the model's context. Different wording, fact-related text, a placement closer to the query, or much longer prefix lengths could affect the edit in other ways. The experiment also did not compare prefixed prompts under either fine-tuning baseline. Its conclusion is limited to the model contrast, prompt groups, and texts tested here.
+\section{Reproduced causal tracing}
+For GPT-2 XL I checked the released known-facts collection against its clean predicted answer token. I used seed 42 to select 50 eligible statements without replacement. Gaussian noise was added to the subject-token embeddings using three times their reference standard deviation. Each corrupted condition used ten noise draws. I compared the corrupted answer probability with the probability recovered by restoring clean MLP or attention outputs at one token over a window centered on each layer. I subtracted the corrupted probability within the same statement. Where a token group contained several positions, I averaged positions within the statement, then averaged statements that contained that group.
+
+\subsection{Clean, corrupted and restored runs}
+I screened the released known-facts collection by prompting the unchanged model in each recorded wording. A statement qualified if the model's clean top next token matched the target string after trimming whitespace. The screen accepted 1,208 statements. I then drew 50 without replacement. For each of the 50 prompts, I could then track the same answer token before corruption, after corruption, and after restoring the clean output.
+
+For each statement, the clean forward pass gives a baseline probability for its predicted token. Noise in the subject embeddings reduces the information the model gets from reading the subject, and the corrupted pass provides a lower comparison probability on average. For each token position and center layer, the tracing procedure restores the chosen clean output for that position across a ten-layer window. The procedure restores either MLP outputs or attention outputs in a given run. The score plotted here is the mean predicted-token probability for the restored run minus the probability under corruption, with the difference computed for each statement before averaging. Across the matched 50 statements the mean clean and corrupted probabilities were 25.1\% and 3.1\%, respectively.
+
+The paper groups positions by their relationship to the subject and the query. I used first, middle, and last subject positions, plus the first position after the subject, intermediate after-subject positions, and the last prompt token. I average the intermediate positions of the same type within a statement. A group contributes a statement only when at least one token lies in that group, so a statement with a longer subject does not dominate the middle-subject mean. Forty-one statements had at least one middle subject token, and 45 had an intermediate token after the subject. Both line-plot panels use all 50 statements. For those panels I resample whole statements to show pointwise 95\% intervals around each mean effect curve.
+
+\begin{figure*}[t]\centering\includegraphics[width=\textwidth]{tracing_profiles.pdf}
+\caption{Restoration effects at the last subject token and the last prompt token. Solid blue shows MLP restoration, and dashed orange shows attention restoration. Shading gives pointwise 95\% statement-bootstrap intervals. Positive values indicate a higher probability of the clean answer after restoration.}
+\end{figure*}
+\begin{figure*}[t]\centering\includegraphics[width=.85\textwidth]{tracing.pdf}\caption{Mean restoration effect by token position and center layer on the separate tracing sample. Positive values mean that restoring the clean component raised the probability of the clean answer. Each panel uses the same color scale.}\end{figure*}
+At the last subject token, the largest average MLP recovery was 6.5 percentage points at layer 18. At the last prompt token, the largest attention recovery was 7.8 percentage points at layer 32. Each peak identifies the center of a ten-layer window. Several layers are restored together, so the peak cannot identify one layer as solely responsible for the recovery. The trace tests unedited model activations, whereas the editing experiment tests the consequences of a persistent weight change.
+
+\subsection{How the trace informs the editing result}
+The first statement in the random sample asked about Vita Semerenko's citizenship. GPT-2 XL assigned 19.8\% probability to the answer token for Ukraine. Adding noise to the name lowered it to 3.1\%. Restoring the MLP outputs at the last token of the name around layer 18 raised it to 9.2\%. In a separate run, restoring attention at the final word of the prompt around layer 32 raised it to 10.2\%. Neither recovered the full clean probability. Across the 50 statements, the average curves show the same separation between the two positions. This agrees with the paper's distinction between computations near the last subject token and later attention at prediction time. An early computation can influence later ones, so a successful restoration indicates a part of the path through which information affects the result. It does not establish that a factual statement is stored only at one token or in one module.
+
+The edit applies to a middle-layer MLP, near the center of the recovered subject-position effect. However, the tracing analysis intervenes on intact activations at inference time, and the benchmark applies a lasting change to the model weights before testing. One way to see the difference is that restoring an activation affects only that pass through the network. The weight edit also affects later prompts, including the neighborhood questions. The probability changes in the tracing experiment and the candidate-preference rates in the editing experiment therefore measure different outcomes. The 50 targets were screened for known clean predictions, which also limits the tracing conclusion to those eligible statements.
+\section{Resources}
+The experiments used a Colab NVIDIA Tesla T4 and float32 GPT-2 XL. The public implementation was fixed at commit \texttt{0874014c}, and the model and tokenizer used revision \texttt{15ea56de}. The released cached second moment was used for ROME. The editing cases took 2.38 GPU wall-clock hours in total, excluding setup, pilot and tracing, and the largest measured allocation during those cases was 9.58 GB.
+\section{Code and reproducibility}
+The experiment notebook uses the authors' revision for the editing and tracing routines, while the project code selects the pilot and evaluation cases, builds the prefixed prompts, scores the four conditions, and saves the trace arrays. The separate analysis script reads the saved result archive and recomputes the reported estimates on a CPU. The README gives the order of the GPU notebook cells and the command to analyze the saved files. A complete archive contains the 200 evaluation cases, 20 pilot cases, 50 MLP arrays and 50 attention arrays, along with the case plans, prefixes, and generated editing contexts.
+
+\ifx\ProjectRepository\empty
+\else
+Project repository: \expandafter\url\expandafter{\ProjectRepository}.
+\fi
+
+The same record IDs are used for all four methods. The notebook saves the losses for both candidate answers on every prompt, so a reader can check an individual decision as well as the average. The CPU analysis checks for missing evaluation cases, excludes the pilot, and groups each case's prompts before calculating its interval. Each tracing file contains the clean and corrupted probabilities, the subject-token positions, and the restored probability at each token and layer. These values give the reader enough information to change the token grouping or look at a single statement like the citizenship example.
+
+\section{Limitations}
+The experiment tests changes to one fact at a time with the original model restored between cases. A model that receives a second edit before answering again could behave differently. I tested each edit separately and scored the prompts supplied for that fact. The 200 paired cases give a direct comparison of methods under the same conditions. They cannot show whether the same contrast would appear for every relation or model scale. The three measured success rates have distinct meanings, and a composite score compresses those trade-offs into one number.
+
+The tracing sample is smaller and restricted to clean predictions that meet the next-token match. Its intervals describe variation across the eligible statements selected here. The curves share a set of statements and a corruption method. The locations of the peaks should be read as centers of windows where recovery is strong. Interpreting each layer as an independent test or using the peaks to claim an exact storage layer would go beyond this design.
+
+\section{Conclusion}
+ROME and ordinary fine-tuning both preferred the replacement answer on the original prompt in all 200 cases. ROME preserved the answer to questions about related subjects much more often (78.2\% versus 42.1\%). Adding 128 tokens of unrelated text lowered paraphrase success by two percentage points in both models. On this sample, the choice of editing method made a much larger difference to neighboring facts than the choice of prefix.
+\bibliography{references}
+\end{document}
